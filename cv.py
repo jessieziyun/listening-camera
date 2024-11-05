@@ -1,91 +1,134 @@
-#imports
+# Imports
 import io
 import os
 import time
-import requests
 from dotenv import load_dotenv
-import openai
-from google.cloud import vision
 from picamera2 import Picamera2
+from vertexai import init
+from vertexai.preview.vision_models import Image, ImageTextModel
+import google.generativeai as genai
+from elevenlabs import VoiceSettings
+from elevenlabs.client import ElevenLabs
 from pydub import AudioSegment
 from pydub.playback import play
 from gradio_client import Client
 
-#load env
+# Load environment variables
 load_dotenv()
 
-#set up camera
+# Set up constants and initialize Vertex AI
+output_dir = "output/"
+PROJECT_ID = "listening-camera"
+init(project=PROJECT_ID, location="europe-west2")
+genai.configure(api_key=os.getenv("GOOGLEGENAI_API_KEY"))
+huggingface_client = Client("zzyjn/create-audio", os.getenv("HF_TOKEN"))
+elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+
+# Initialize models
+caption_model = ImageTextModel.from_pretrained("imagetext@001")
+poem_model = genai.GenerativeModel("gemini-1.5-flash")
+
+# Initialize camera
 camera = Picamera2()
-capture_config = camera.create_still_configuration()
-camera.configure(camera.create_preview_configuration())
+camera.configure(camera.create_still_configuration())
 camera.start()
 
-#capture image to stream
-def capture_image():
-  time.sleep(1)
-  stream = io.BytesIO()
-  camera.capture_file(stream, format='jpeg')
-  print("Captured image")
-  return stream
+def log_message(title: str, message: str):
+    """Log messages in a formatted way."""
+    print("\n" + "-" * 40)
+    print(f"{title}:")
+    print(message)
+    print("-" * 40)
 
-#get image labels
-def get_labels():
-  stream = capture_image()
-  client = vision.ImageAnnotatorClient()
-  content = stream.getvalue()
-  image = vision.Image(content=content)
-  response = client.label_detection(image=image)
-  labels = response.label_annotations
-  image_labels = "\n".join(str(label.description) for label in labels)
-  return image_labels
+def capture_and_caption_image():
+    """Captures an image and returns its captions."""
+    time.sleep(1)  # Allow time for the camera to adjust
+    stream = io.BytesIO()
+    
+    # Capture and save the image
+    camera.capture_file(stream, format='jpeg')
+    file_name = f"{int(time.time())}_capture.jpg"
+    camera.capture_file(os.path.join(output_dir, file_name))
+    log_message("Captured Image", "Image has been captured successfully.")
 
-#generate a haiku from image labels
-def generate_haiku():
-  image_labels = get_labels()
-  openai.api_key = os.getenv("OPENAI_API_KEY")
-  completion = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo",
-    messages=[
-      {"role": "user", "content": "Using the following words as inspiration, write a haiku.\n"+image_labels}
-    ]
-  )
-  return completion.choices[0].message.content
+    # Generate captions for the image
+    source_img = Image(image_bytes=stream.getvalue())
+    log_message("Generating Image Caption", "Retrieving captions for the captured image...")
+    captions = caption_model.get_captions(image=source_img)
+    log_message("Image Captions", "\n".join(captions))
 
-def to_speech(text):
-  CHUNK_SIZE = 1024
-  voice_id = "21m00Tcm4TlvDq8ikWAM"
-  url = "https://api.elevenlabs.io/v1/text-to-speech/" + voice_id
-  headers = {
-    "Accept": "audio/mpeg",
-    "Content-Type": "application/json",
-    "xi-api-key": os.getenv("ELEVENLABS_API_KEY")
-  }
-  data = {
-    "text": text,
-    "model_id": "eleven_monolingual_v1",
-    "voice_settings": {
-      "stability": 0,
-      "similarity_boost": 0
-    }
-  }
-  response = requests.post(url, json=data, headers=headers)
-  stream = io.BytesIO()
-  for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
-    if chunk:
-      stream.write(chunk)
-  stream.seek(0)
-  sound = AudioSegment.from_file(stream, 'mp3')
-  play(sound)
+    return captions
 
-def load_space():
-  HF_TOKEN = os.getenv("HF_TOKEN")
-  client = Client("https://zzyjn-text-to-audio.hf.space/", HF_TOKEN)
-  return client
+def write_poem(caption):
+    """Generates a poem based on the provided caption."""
+    log_message("Generating Poem", "Creating a poem from the caption...")
+    response = poem_model.generate_content(
+        f"You are a world-class poet. Write a poem inspired by this scene: {caption}."
+    )
+    log_message("Generated Poem", response.text)
+    return response.text  # Return the generated poem
 
-def to_audio(client, text):
-  result = client.predict(
-    text,
-    api_name="/predict"
-  )
-  sound = AudioSegment.from_file(result, 'mp4')
-  play(sound)
+def text_to_speech_file(text: str) -> str:
+    """Converts text to speech and saves it to an MP3 file."""
+    log_message("Generating Audio", "Converting text to speech...")
+    response = elevenlabs_client.text_to_speech.convert(
+        voice_id="pFZP5JQG7iQjIQuC4Bku",  # Lily pre-made voice
+        output_format="mp3_22050_32",
+        text=text,
+        model_id="eleven_turbo_v2_5",  # Use turbo model for low latency
+        voice_settings=VoiceSettings(
+            stability=0.0,
+            similarity_boost=1.0,
+            style=0.0,
+            use_speaker_boost=True,
+        ),
+    )
+
+    file_name = f"{int(time.time())}_tts.mp3"
+    save_file_path = os.path.join(output_dir, file_name)
+
+    with open(save_file_path, "wb") as f:
+        for chunk in response:
+            if chunk:
+                f.write(chunk)
+
+    log_message("Audio File Saved", f"{save_file_path}: Audio file saved successfully!")
+    return save_file_path
+
+def to_audio(text):
+    """Generates audio from text using the Hugging Face API."""
+    try:
+        log_message("Generating Audio", f"Sending text to API: {text}")
+        result = huggingface_client.predict(text, api_name="/predict")
+        log_message("Raw API Response", str(result))
+
+        # Export audio
+        sound = AudioSegment.from_file(result, 'mp4')
+        file_name = f"{int(time.time())}_audio.mp3"
+        output_path = os.path.join(output_dir, file_name)
+        sound.export(output_path)
+        log_message("Audio File Saved", f"{output_path}: Audio was saved successfully!")
+        return output_path
+    except Exception as e:
+        print(f"Error during audio generation: {str(e)}")
+        raise
+
+def generate_audio(audio_type: str):
+    """Generates and plays audio based on the specified type."""
+    # Capture image and generate captions
+    caption = capture_and_caption_image()
+    
+    # Generate poem from the caption
+    poem = write_poem(caption)
+
+    if audio_type == "tts":
+        audio_file = text_to_speech_file(poem)
+    elif audio_type == "audio":
+        audio_file = to_audio(poem)
+    else:
+        raise ValueError("Invalid audio_type. Must be 'tts' or 'audio'.")
+
+    # Play the generated audio file
+    sound = AudioSegment.from_file(audio_file)
+    play(sound)
+    log_message("Playing Audio", f"Playing {audio_type} audio from file: {audio_file}")
