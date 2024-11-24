@@ -9,12 +9,12 @@ def main():
     GPIO.setup(button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     ButtonHandler(button_pin, GPIO.FALLING, button_callback)
 
-    message = input("Press enter to quit\n\n")  # Run until someone presses enter
+    message = input("Press enter to quit\n\n")  # Run until enter key pressed
 
 def button_callback(args):
-    print("Button pressed, generating audio...")
+    # print("Button pressed, generating audio...")
     try:
-        generate_audio('tts')  # Call the function to generate audio using TTS
+        generate_audio('audio')  # Call the function to generate audio
     except Exception as e:
         print(f"Error generating audio: {e}")
 
@@ -35,11 +35,11 @@ class ButtonHandler():
 
     def __call__(self, *args):
         if time.time() < self.last_trigger + self.cooldown_time_s:
-            print("Looking for trigger blocked because still on cooldown")
+            # print("Looking for trigger blocked because still on cooldown")
             return
 
         if not self.lock.acquire(blocking=False):
-            print("Looking for trigger blocked because already looking")
+            # print("Looking for trigger blocked because already looking")
             return
 
         t = threading.Thread(None, self.look_for_triggers, args=args, daemon=True)
@@ -59,7 +59,7 @@ class ButtonHandler():
             if rate > 0.9:
                 self.last_trigger = time.time()
                 self.trigger_count += 1
-                print(f"trigger_count=({self.trigger_count})")
+                # print(f"trigger_count=({self.trigger_count})")
                 self.func(*args)
                 break
 

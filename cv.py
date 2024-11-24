@@ -35,10 +35,10 @@ camera.start()
 
 def log_message(title: str, message: str):
     """Log messages in a formatted way."""
-    print("\n" + "-" * 40)
+    print("\n" + "-" * 92)
     print(f"{title}:")
     print(message)
-    print("-" * 40)
+    print("-" * 92)
 
 def capture_and_caption_image():
     """Captures an image and returns its captions."""
@@ -63,7 +63,7 @@ def write_poem(caption):
     """Generates a poem based on the provided caption."""
     log_message("Generating Poem", "Creating a poem from the caption...")
     response = poem_model.generate_content(
-        f"You are a world-class poet. Write a poem inspired by this scene: {caption}."
+        f"You are a world-class poet. Compose a free-verse poem inspired by this scene: {caption}."
     )
     log_message("Generated Poem", response.text)
     return response.text  # Return the generated poem
@@ -98,16 +98,16 @@ def text_to_speech_file(text: str) -> str:
 def to_audio(text):
     """Generates audio from text using the Hugging Face API."""
     try:
-        log_message("Generating Audio", f"Sending text to API: {text}")
+        log_message("Generating Audio", f"Sending poem  to API...")
         result = huggingface_client.predict(text, api_name="/predict")
-        log_message("Raw API Response", str(result))
+        log_message("Received Audio", str(result))
 
         # Export audio
         sound = AudioSegment.from_file(result, 'mp4')
-        file_name = f"{int(time.time())}_audio.mp3"
+        file_name = f"{int(time.time())}.mp3"
         output_path = os.path.join(output_dir, file_name)
         sound.export(output_path)
-        log_message("Audio File Saved", f"{output_path}: Audio was saved successfully!")
+        # log_message("Audio File Saved", f"{output_path}: Audio was saved successfully!")
         return output_path
     except Exception as e:
         print(f"Error during audio generation: {str(e)}")
@@ -130,5 +130,5 @@ def generate_audio(audio_type: str):
 
     # Play the generated audio file
     sound = AudioSegment.from_file(audio_file)
+    log_message("Playing Audio", f"Playing {audio_file}")
     play(sound)
-    log_message("Playing Audio", f"Playing {audio_type} audio from file: {audio_file}")
