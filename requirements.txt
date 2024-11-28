@@ -22,7 +22,6 @@ dill==0.3.6
 distro==1.8.0
 docstring_parser==0.16
 docutils==0.19
-elevenlabs==1.12.1
 filelock==3.16.1
 Flask==2.2.2
 fsspec==2024.10.0
