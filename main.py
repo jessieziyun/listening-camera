@@ -14,7 +14,8 @@ def main():
 def button_callback(args):
     # print("Button pressed, generating audio...")
     try:
-        generate_audio('audio')  # Call the function to generate audio
+        timestamp = int(time.time())
+        generate_audio(timestamp)  # Call the function to generate audio
     except Exception as e:
         print(f"Error generating audio: {e}")
 

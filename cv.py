@@ -12,6 +12,7 @@ from elevenlabs.client import ElevenLabs
 from pydub import AudioSegment
 from pydub.playback import play
 from gradio_client import Client
+from prompts import poet_prompt, film_composer_prompt
 
 # Load environment variables
 load_dotenv()
@@ -40,14 +41,14 @@ def log_message(title: str, message: str):
     print(message)
     print("-" * 92)
 
-def capture_and_caption_image():
+def capture_and_caption_image(timestamp):
     """Captures an image and returns its captions."""
     time.sleep(1)  # Allow time for the camera to adjust
     stream = io.BytesIO()
     
     # Capture and save the image
     camera.capture_file(stream, format='jpeg')
-    file_name = f"{int(time.time())}_capture.jpg"
+    file_name = f"{timestamp}_capture.jpg"
     camera.capture_file(os.path.join(output_dir, file_name))
     log_message("Captured Image", "Image has been captured successfully.")
 
@@ -59,52 +60,36 @@ def capture_and_caption_image():
 
     return captions
 
-def write_poem(caption):
+def write_poem(caption, timestamp):
     """Generates a poem based on the provided caption."""
     log_message("Generating Poem", "Creating a poem from the caption...")
     response = poem_model.generate_content(
-        f"You are a world-class poet. Compose a free-verse poem inspired by this scene: {caption}."
+        f"{poet_prompt}\n{caption}."
     )
+    file_name = f"{timestamp}_poem.txt"
+    with open(file_name, "w") as text_file:
+        print(response.text, file=text_file)
     log_message("Generated Poem", response.text)
     return response.text  # Return the generated poem
 
-def text_to_speech_file(text: str) -> str:
-    """Converts text to speech and saves it to an MP3 file."""
-    log_message("Generating Audio", "Converting text to speech...")
-    response = elevenlabs_client.text_to_speech.convert(
-        voice_id="pFZP5JQG7iQjIQuC4Bku",  # Lily pre-made voice
-        output_format="mp3_22050_32",
-        text=text,
-        model_id="eleven_turbo_v2_5",  # Use turbo model for low latency
-        voice_settings=VoiceSettings(
-            stability=0.0,
-            similarity_boost=1.0,
-            style=0.0,
-            use_speaker_boost=True,
-        ),
-    )
+def generate_soundtrack_description(poem, timestamp):
+    response = poem_model.generate_content(f"{film_composer_prompt}\n*Input:*\n{poem}")
+    file_name = f"{timestamp}_audio.txt"
+    with open(file_name, "w") as text_file:
+        print(response.text, file=text_file)
+    log_message("Generated Audio Description", response.text)
+    return response.text
 
-    file_name = f"{int(time.time())}_tts.mp3"
-    save_file_path = os.path.join(output_dir, file_name)
-
-    with open(save_file_path, "wb") as f:
-        for chunk in response:
-            if chunk:
-                f.write(chunk)
-
-    log_message("Audio File Saved", f"{save_file_path}: Audio file saved successfully!")
-    return save_file_path
-
-def to_audio(text):
+def to_audio(prompt, timestamp):
     """Generates audio from text using the Hugging Face API."""
     try:
-        log_message("Generating Audio", f"Sending poem  to API...")
-        result = huggingface_client.predict(text, api_name="/predict")
+        log_message("Generating Audio", f"Sending poem to API...")
+        result = huggingface_client.predict(prompt, api_name="/predict")
         log_message("Received Audio", str(result))
 
         # Export audio
         sound = AudioSegment.from_file(result, 'mp4')
-        file_name = f"{int(time.time())}.mp3"
+        file_name = f"{timestamp}.mp3"
         output_path = os.path.join(output_dir, file_name)
         sound.export(output_path)
         # log_message("Audio File Saved", f"{output_path}: Audio was saved successfully!")
@@ -113,20 +98,15 @@ def to_audio(text):
         print(f"Error during audio generation: {str(e)}")
         raise
 
-def generate_audio(audio_type: str):
+def generate_audio(timestamp):
     """Generates and plays audio based on the specified type."""
     # Capture image and generate captions
-    caption = capture_and_caption_image()
+    caption = capture_and_caption_image(timestamp)
     
     # Generate poem from the caption
-    poem = write_poem(caption)
-
-    if audio_type == "tts":
-        audio_file = text_to_speech_file(poem)
-    elif audio_type == "audio":
-        audio_file = to_audio(poem)
-    else:
-        raise ValueError("Invalid audio_type. Must be 'tts' or 'audio'.")
+    poem = write_poem(caption, timestamp)
+    audio_prompt = generate_soundtrack_description(poem, timestamp)
+    audio_file = to_audio(audio_prompt, timestamp)
 
     # Play the generated audio file
     sound = AudioSegment.from_file(audio_file)
